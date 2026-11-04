@@ -1,4 +1,4 @@
-import { StyleSheet, ScrollView } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CategoryBars } from '@/components/analytics/category-bars';
@@ -6,29 +6,21 @@ import { HeatmapGrid } from '@/components/analytics/heatmap-grid';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useAppData } from '@/context/app-data-context';
 import { categoryPerformance, dailyHeatmap, toIsoDate } from '@/domain';
-import {
-  PLACEHOLDER_CATEGORIES,
-  PLACEHOLDER_HABITS,
-  PLACEHOLDER_LOGS,
-  PLACEHOLDER_PAUSES,
-} from '@/features/habits/placeholders';
 
 export default function AnalyticsScreen() {
   const today = toIsoDate(new Date());
-  const cells = dailyHeatmap(PLACEHOLDER_HABITS, PLACEHOLDER_LOGS, PLACEHOLDER_PAUSES, today);
-  const stats = categoryPerformance(
-    PLACEHOLDER_HABITS,
-    PLACEHOLDER_LOGS,
-    PLACEHOLDER_PAUSES,
-    PLACEHOLDER_CATEGORIES,
-  );
+  const { habits, logs, pauses, categories } = useAppData();
+
+  const cells = dailyHeatmap(habits, logs, pauses, today);
+  const stats = categoryPerformance(habits, logs, pauses, categories);
 
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <ThemedText type="subtitle">Analítica</ThemedText>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <HeatmapGrid cells={cells} />
           <CategoryBars stats={stats} />
         </ScrollView>
@@ -50,5 +42,6 @@ const styles = StyleSheet.create({
   content: {
     gap: Spacing.five,
     paddingTop: Spacing.three,
+    paddingBottom: Spacing.six,
   },
 });
