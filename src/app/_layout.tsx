@@ -1,29 +1,46 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
 import { AppDataProvider } from '@/context/app-data-context';
 import { ThemeContextProvider, useThemePreference } from '@/context/theme-context';
 
 SplashScreen.preventAutoHideAsync();
 
-function LayoutContent() {
+function RootNavigator() {
   const { resolvedScheme } = useThemePreference();
 
   return (
     <ThemeProvider value={resolvedScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AnimatedSplashOverlay />
-      <AppTabs />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="habit/new"
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+        <Stack.Screen
+          name="habit/[id]"
+          options={{ presentation: 'card', headerShown: false }}
+        />
+        <Stack.Screen
+          name="reminder/new"
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+        <Stack.Screen
+          name="reminder/[id]"
+          options={{ presentation: 'card', headerShown: false }}
+        />
+      </Stack>
     </ThemeProvider>
   );
 }
 
-export default function TabLayout() {
+export default function RootLayout() {
   return (
     <ThemeContextProvider>
       <AppDataProvider>
-        <LayoutContent />
+        <RootNavigator />
       </AppDataProvider>
     </ThemeContextProvider>
   );

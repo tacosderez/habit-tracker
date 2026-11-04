@@ -41,6 +41,7 @@ export default function SettingsScreen() {
     updateCategory,
     deleteCategory,
     isSyncing,
+    authWarning,
     refreshData,
   } = useAppData();
 
@@ -53,7 +54,7 @@ export default function SettingsScreen() {
 
   const handleSelectTheme = async (pref: ThemePreference) => {
     setPreference(pref);
-    if (userId) {
+    if (userId && userId !== 'local-device') {
       try {
         const supabase = getSupabase();
         await supabase
@@ -138,6 +139,27 @@ export default function SettingsScreen() {
         <ThemedText type="subtitle">Ajustes</ThemedText>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+          {/* Supabase Anonymous Warning Banner */}
+          {authWarning && (
+            <ThemedView type="backgroundElement" style={[styles.sectionCard, styles.warningCard]}>
+              <ThemedText type="smallBold" style={styles.warningTitle}>
+                ⚠️ Sincronización en la nube pendiente
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                Tu proyecto de Supabase tiene desactivado el inicio de sesión anónimo.
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                Para activar el guardado en la nube:
+                {'\n'}1. Entra a tu consola de Supabase.
+                {'\n'}2. Ve a Authentication ➔ Providers.
+                {'\n'}3. Activa el interruptor &quot;Anonymous Sign-ins&quot;.
+              </ThemedText>
+              <ThemedText type="small" style={styles.localReadyText}>
+                ✓ La app funciona normalmente de forma local mientras lo activas.
+              </ThemedText>
+            </ThemedView>
+          )}
+
           {/* Theme Preference */}
           <ThemedView type="backgroundElement" style={styles.sectionCard}>
             <ThemedText type="smallBold">Tema de la aplicación</ThemedText>
@@ -174,7 +196,7 @@ export default function SettingsScreen() {
           {/* Categories Management */}
           <ThemedView type="backgroundElement" style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <View>
+              <View style={styles.sectionTitleContainer}>
                 <ThemedText type="smallBold">Categorías personalizadas</ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
                   Crea y personaliza categorías y sus colores
@@ -290,10 +312,12 @@ export default function SettingsScreen() {
           {/* Supabase Connection Info */}
           <ThemedView type="backgroundElement" style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <View>
+              <View style={styles.sectionTitleContainer}>
                 <ThemedText type="smallBold">Base de datos (Supabase)</ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
-                  {userId ? `Sesión: ${userId.slice(0, 12)}...` : 'Conectando sesión...'}
+                  {userId && userId !== 'local-device'
+                    ? `Sesión activa: ${userId.slice(0, 12)}...`
+                    : 'Modo local activo'}
                 </ThemedText>
               </View>
 
@@ -349,10 +373,26 @@ const styles = StyleSheet.create({
     borderRadius: Spacing.three,
     gap: Spacing.two,
   },
+  warningCard: {
+    borderColor: '#EAB308',
+    borderWidth: 1,
+  },
+  warningTitle: {
+    color: '#EAB308',
+  },
+  localReadyText: {
+    color: '#22C55E',
+    fontWeight: '600',
+  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: Spacing.two,
+  },
+  sectionTitleContainer: {
+    flex: 1,
+    paddingRight: Spacing.one,
   },
   themeOptionsRow: {
     flexDirection: 'row',
@@ -371,6 +411,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one,
     borderRadius: Spacing.two,
+    flexShrink: 0,
   },
   categoryFormCard: {
     padding: Spacing.three,
