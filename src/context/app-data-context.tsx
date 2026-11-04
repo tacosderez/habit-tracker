@@ -7,6 +7,7 @@ import {
   PLACEHOLDER_PAUSES,
   PLACEHOLDER_REMINDERS,
 } from '@/features/habits/placeholders';
+import { addDays, parseIsoDate, toIsoDate } from '@/domain';
 import { getSupabase } from '@/lib/supabase/client';
 import type {
   Category,
@@ -335,9 +336,28 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       (p) => p.habit_id === habitId && (p.ends_on === null || p.ends_on >= today),
     );
 
-    if (activePause) {
+    if (!activePause) return;
+
+    const startsOn = activePause.starts_on;
+    const isStartedTodayOrLater = startsOn >= today;
+
+    if (isStartedTodayOrLater) {
+      // Pause started today or in the future: delete it so today is active
+      setPauses((prev) => prev.filter((p) => p.id !== activePause.id));
+
+      if (userId && userId !== 'local-device') {
+        try {
+          const supabase = getSupabase();
+          await supabase.from('habit_pauses').delete().eq('id', activePause.id);
+        } catch (err: unknown) {
+          console.warn('Supabase resume delete warning:', err);
+        }
+      }
+    } else {
+      // Pause started in the past: set ends_on to yesterday so today is active
+      const yesterday = toIsoDate(addDays(parseIsoDate(today), -1));
       setPauses((prev) =>
-        prev.map((p) => (p.id === activePause.id ? { ...p, ends_on: today } : p)),
+        prev.map((p) => (p.id === activePause.id ? { ...p, ends_on: yesterday } : p)),
       );
 
       if (userId && userId !== 'local-device') {
@@ -345,10 +365,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           const supabase = getSupabase();
           await supabase
             .from('habit_pauses')
-            .update({ ends_on: today })
+            .update({ ends_on: yesterday })
             .eq('id', activePause.id);
         } catch (err: unknown) {
-          console.warn('Supabase resume warning:', err);
+          console.warn('Supabase resume update warning:', err);
         }
       }
     }

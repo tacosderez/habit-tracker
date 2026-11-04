@@ -19,14 +19,16 @@ import { currentStreak, isHabitPausedOn, toIsoDate } from '@/domain';
 import { useTheme } from '@/hooks/use-theme';
 import type { HabitFrequency, TrackingType } from '@/types/database';
 
-const WEEKDAYS = [
-  { id: 1, label: 'L' },
-  { id: 2, label: 'M' },
-  { id: 3, label: 'M' },
-  { id: 4, label: 'J' },
-  { id: 5, label: 'V' },
-  { id: 6, label: 'S' },
-  { id: 7, label: 'D' },
+export type ScheduleMode = 'daily' | 'specific_days' | 'weekly' | 'monthly';
+
+export const WEEKDAYS = [
+  { id: 1, label: 'L', name: 'Lunes' },
+  { id: 2, label: 'M', name: 'Martes' },
+  { id: 3, label: 'M', name: 'Miércoles' },
+  { id: 4, label: 'J', name: 'Jueves' },
+  { id: 5, label: 'V', name: 'Viernes' },
+  { id: 6, label: 'S', name: 'Sábado' },
+  { id: 7, label: 'D', name: 'Domingo' },
 ];
 
 export default function HabitDetailScreen() {
@@ -48,14 +50,30 @@ export default function HabitDetailScreen() {
 
   const habit = useMemo(() => habits.find((h) => h.id === id), [habits, id]);
 
+  const initialScheduleMode: ScheduleMode = useMemo(() => {
+    if (!habit) return 'daily';
+    if (habit.frequency === 'monthly') return 'monthly';
+    if (habit.frequency === 'weekly') return 'weekly';
+    if (habit.schedule_weekdays && habit.schedule_weekdays.length > 0) return 'specific_days';
+    return 'daily';
+  }, [habit]);
+
   const [title, setTitle] = useState(habit?.title ?? '');
   const [description, setDescription] = useState(habit?.description ?? '');
   const [categoryId, setCategoryId] = useState<string | null>(habit?.category_id ?? null);
-  const [frequency] = useState<HabitFrequency>(habit?.frequency ?? 'daily');
   const [trackingType] = useState<TrackingType>(habit?.tracking_type ?? 'boolean');
   const [targetValue, setTargetValue] = useState(String(habit?.target_value ?? 1));
   const [unit, setUnit] = useState(habit?.unit ?? '');
+
+  // Schedule mode state
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>(initialScheduleMode);
   const [weekdays, setWeekdays] = useState<number[]>(habit?.schedule_weekdays ?? []);
+  const [weeklyTimes, setWeeklyTimes] = useState<number>(3);
+  const [weeklyFixDays, setWeeklyFixDays] = useState<boolean>(
+    Boolean(habit?.schedule_weekdays && habit.schedule_weekdays.length > 0),
+  );
+  const [monthlyTimes, setMonthlyTimes] = useState<number>(1);
+
   const [pauseReason, setPauseReason] = useState('');
   const [showPauseInput, setShowPauseInput] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -94,17 +112,42 @@ export default function HabitDetailScreen() {
       return;
     }
 
+    // Determine final frequency and weekdays
+    let finalFrequency: HabitFrequency = 'daily';
+    let finalWeekdays: number[] | null = null;
+
+    if (scheduleMode === 'daily') {
+      finalFrequency = 'daily';
+      finalWeekdays = null;
+    } else if (scheduleMode === 'specific_days') {
+      if (weekdays.length === 0) {
+        Alert.alert(
+          'Días requeridos',
+          'Selecciona al menos un día específico de la semana.',
+        );
+        return;
+      }
+      finalFrequency = 'daily';
+      finalWeekdays = weekdays;
+    } else if (scheduleMode === 'weekly') {
+      finalFrequency = 'weekly';
+      finalWeekdays = weeklyFixDays && weekdays.length > 0 ? weekdays : null;
+    } else if (scheduleMode === 'monthly') {
+      finalFrequency = 'monthly';
+      finalWeekdays = null;
+    }
+
     setIsSubmitting(true);
     try {
       await updateHabit(habit.id, {
         title: title.trim(),
         description: description.trim() || null,
         category_id: categoryId,
-        frequency,
+        frequency: finalFrequency,
         tracking_type: trackingType,
         target_value: trackingType === 'boolean' ? 1 : numTarget,
         unit: trackingType === 'boolean' ? null : unit.trim() || null,
-        schedule_weekdays: weekdays.length > 0 ? weekdays : null,
+        schedule_weekdays: finalWeekdays,
       });
 
       Alert.alert('Éxito', 'Hábito actualizado correctamente.', [
@@ -290,6 +333,189 @@ export default function HabitDetailScreen() {
             </ScrollView>
           </View>
 
+          {/* Schedule Mode Selector */}
+          <View style={styles.field}>
+            <ThemedText type="smallBold">Frecuencia y Programación</ThemedText>
+            <View style={styles.scheduleGrid}>
+              {[
+                { key: 'daily' as ScheduleMode, label: '☀️ Diario', desc: 'Todos los días' },
+                {
+                  key: 'specific_days' as ScheduleMode,
+                  label: '📅 Días específicos',
+                  desc: 'Elige qué días',
+                },
+                { key: 'weekly' as ScheduleMode, label: '🔄 Semanal', desc: 'X veces por sem.' },
+                { key: 'monthly' as ScheduleMode, label: '🗓️ Mensual', desc: 'X veces por mes' },
+              ].map((opt) => {
+                const isSelected = scheduleMode === opt.key;
+                return (
+                  <Pressable
+                    key={opt.key}
+                    onPress={() => setScheduleMode(opt.key)}
+                    style={[
+                      styles.scheduleCard,
+                      { backgroundColor: theme.backgroundElement },
+                      isSelected && { borderColor: '#3B82F6', borderWidth: 2 },
+                    ]}>
+                    <ThemedText type="smallBold">{opt.label}</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {opt.desc}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* Prompt: Daily */}
+            {scheduleMode === 'daily' && (
+              <ThemedView type="backgroundElement" style={styles.promptBox}>
+                <ThemedText type="small">
+                  ✓ Este hábito se programa para todos los días de la semana.
+                </ThemedText>
+              </ThemedView>
+            )}
+
+            {/* Prompt: Specific Days */}
+            {scheduleMode === 'specific_days' && (
+              <ThemedView type="backgroundElement" style={styles.promptBox}>
+                <ThemedText type="smallBold">
+                  Selecciona los días específicos de la semana:
+                </ThemedText>
+                <View style={styles.weekdayRow}>
+                  {WEEKDAYS.map((w) => {
+                    const isSelected = weekdays.includes(w.id);
+                    return (
+                      <Pressable
+                        key={w.id}
+                        onPress={() => toggleWeekday(w.id)}
+                        style={[
+                          styles.weekdayCircle,
+                          { backgroundColor: theme.backgroundSelected },
+                          isSelected && { backgroundColor: '#3B82F6' },
+                        ]}>
+                        <ThemedText
+                          type="smallBold"
+                          style={{ color: isSelected ? '#ffffff' : theme.text }}>
+                          {w.label}
+                        </ThemedText>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {weekdays.length === 0
+                    ? 'Selecciona al menos un día'
+                    : weekdays.map((id) => WEEKDAYS.find((d) => d.id === id)?.name).join(', ')}
+                </ThemedText>
+              </ThemedView>
+            )}
+
+            {/* Prompt: Weekly */}
+            {scheduleMode === 'weekly' && (
+              <ThemedView type="backgroundElement" style={styles.promptBox}>
+                <ThemedText type="smallBold">¿Cuántas veces a la semana?</ThemedText>
+                <View style={styles.pillsRow}>
+                  {[1, 2, 3, 4, 5, 6].map((times) => (
+                    <Pressable
+                      key={times}
+                      onPress={() => setWeeklyTimes(times)}
+                      style={[
+                        styles.numberPill,
+                        { backgroundColor: theme.backgroundSelected },
+                        weeklyTimes === times && { backgroundColor: '#3B82F6' },
+                      ]}>
+                      <ThemedText
+                        type="smallBold"
+                        style={{ color: weeklyTimes === times ? '#ffffff' : theme.text }}>
+                        {times}x
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <View style={styles.subQuestionRow}>
+                  <ThemedText type="smallBold">¿Fijar días específicos de la semana?</ThemedText>
+                  <View style={styles.toggleRow}>
+                    <Pressable
+                      onPress={() => setWeeklyFixDays(false)}
+                      style={[
+                        styles.toggleButton,
+                        !weeklyFixDays && { backgroundColor: '#3B82F6' },
+                      ]}>
+                      <ThemedText
+                        type="small"
+                        style={{ color: !weeklyFixDays ? '#ffffff' : theme.text }}>
+                        Flexible
+                      </ThemedText>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => setWeeklyFixDays(true)}
+                      style={[
+                        styles.toggleButton,
+                        weeklyFixDays && { backgroundColor: '#3B82F6' },
+                      ]}>
+                      <ThemedText
+                        type="small"
+                        style={{ color: weeklyFixDays ? '#ffffff' : theme.text }}>
+                        Fijar días
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {weeklyFixDays && (
+                  <View style={styles.weekdayRow}>
+                    {WEEKDAYS.map((w) => {
+                      const isSelected = weekdays.includes(w.id);
+                      return (
+                        <Pressable
+                          key={w.id}
+                          onPress={() => toggleWeekday(w.id)}
+                          style={[
+                            styles.weekdayCircle,
+                            { backgroundColor: theme.backgroundSelected },
+                            isSelected && { backgroundColor: '#3B82F6' },
+                          ]}>
+                          <ThemedText
+                            type="smallBold"
+                            style={{ color: isSelected ? '#ffffff' : theme.text }}>
+                            {w.label}
+                          </ThemedText>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+              </ThemedView>
+            )}
+
+            {/* Prompt: Monthly */}
+            {scheduleMode === 'monthly' && (
+              <ThemedView type="backgroundElement" style={styles.promptBox}>
+                <ThemedText type="smallBold">¿Cuántas veces al mes?</ThemedText>
+                <View style={styles.pillsRow}>
+                  {[1, 2, 3, 4].map((times) => (
+                    <Pressable
+                      key={times}
+                      onPress={() => setMonthlyTimes(times)}
+                      style={[
+                        styles.numberPill,
+                        { backgroundColor: theme.backgroundSelected },
+                        monthlyTimes === times && { backgroundColor: '#3B82F6' },
+                      ]}>
+                      <ThemedText
+                        type="smallBold"
+                        style={{ color: monthlyTimes === times ? '#ffffff' : theme.text }}>
+                        {times} {times === 1 ? 'vez' : 'veces'}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </View>
+              </ThemedView>
+            )}
+          </View>
+
           {/* Target Value and Unit */}
           {trackingType !== 'boolean' && (
             <View style={styles.targetRow}>
@@ -316,34 +542,6 @@ export default function HabitDetailScreen() {
                   value={unit}
                   onChangeText={setUnit}
                 />
-              </View>
-            </View>
-          )}
-
-          {/* Weekdays */}
-          {frequency !== 'monthly' && (
-            <View style={styles.field}>
-              <ThemedText type="smallBold">Días programados</ThemedText>
-              <View style={styles.weekdayRow}>
-                {WEEKDAYS.map((w) => {
-                  const isSelected = weekdays.includes(w.id);
-                  return (
-                    <Pressable
-                      key={w.id}
-                      onPress={() => toggleWeekday(w.id)}
-                      style={[
-                        styles.weekdayCircle,
-                        { backgroundColor: theme.backgroundElement },
-                        isSelected && { backgroundColor: '#3B82F6' },
-                      ]}>
-                      <ThemedText
-                        type="smallBold"
-                        style={{ color: isSelected ? '#ffffff' : theme.text }}>
-                        {w.label}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
               </View>
             </View>
           )}
@@ -461,6 +659,49 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
+  },
+  scheduleGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    marginTop: Spacing.one,
+  },
+  scheduleCard: {
+    width: '48%',
+    padding: Spacing.three,
+    borderRadius: Spacing.two,
+    gap: Spacing.half,
+  },
+  promptBox: {
+    padding: Spacing.three,
+    borderRadius: Spacing.two,
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+  },
+  pillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    marginTop: Spacing.half,
+  },
+  numberPill: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+    borderRadius: Spacing.two,
+  },
+  subQuestionRow: {
+    gap: Spacing.one,
+    marginTop: Spacing.two,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  toggleButton: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+    borderRadius: Spacing.two,
+    backgroundColor: 'rgba(128, 128, 128, 0.2)',
   },
   targetRow: {
     flexDirection: 'row',

@@ -17,15 +17,15 @@ import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useAppData } from '@/context/app-data-context';
 import { buildTodayTimeline, filterTimeline, toIsoDate } from '@/domain';
 import { useTheme } from '@/hooks/use-theme';
-import type { HabitFrequency } from '@/types/database';
+import type { TimelineItem } from '@/types/database';
 
 export default function TimelineScreen() {
   const router = useRouter();
   const theme = useTheme();
   const isoDate = toIsoDate(new Date());
 
-  const [frequency, setFrequency] = useState<HabitFrequency | 'all'>('all');
   const [categoryId, setCategoryId] = useState<string | 'all'>('all');
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
   const {
     habits,
@@ -41,8 +41,9 @@ export default function TimelineScreen() {
     toggleReminderComplete,
   } = useAppData();
 
-  const items = useMemo(() => {
-    const timeline = buildTodayTimeline({
+  // All today's items before filtering (used for the permanent fixed daily progress bar)
+  const allTodayItems = useMemo(() => {
+    return buildTodayTimeline({
       isoDate,
       habits,
       reminders,
@@ -50,13 +51,77 @@ export default function TimelineScreen() {
       pauses,
       categories,
     });
-    return filterTimeline(timeline, { frequency, categoryId });
-  }, [categoryId, frequency, habits, reminders, logs, pauses, categories, isoDate]);
+  }, [isoDate, habits, reminders, logs, pauses, categories]);
 
-  // Overall today's completion stats
-  const habitItems = items.filter((i) => i.kind === 'habit');
-  const completedCount = habitItems.filter((i) => i.kind === 'habit' && i.completionPct >= 1).length;
-  const progressRatio = habitItems.length > 0 ? completedCount / habitItems.length : 0;
+  // Total daily completion stats (FIXED, never disappears when filtering category)
+  const allDueHabits = useMemo(
+    () => allTodayItems.filter((i) => i.kind === 'habit'),
+    [allTodayItems],
+  );
+  const totalCompletedCount = useMemo(
+    () => allDueHabits.filter((i) => i.completionPct >= 1).length,
+    [allDueHabits],
+  );
+  const totalProgressRatio = allDueHabits.length > 0 ? totalCompletedCount / allDueHabits.length : 0;
+
+  // Filter items by selected category
+  const filteredItems = useMemo(() => {
+    return filterTimeline(allTodayItems, { categoryId });
+  }, [allTodayItems, categoryId]);
+
+  // Group items into frequency categories & completed section
+  const sections = useMemo(() => {
+    const dailyItems: TimelineItem[] = [];
+    const specificDaysItems: TimelineItem[] = [];
+    const weeklyItems: TimelineItem[] = [];
+    const monthlyItems: TimelineItem[] = [];
+    const reminderItems: TimelineItem[] = [];
+    const completedItems: TimelineItem[] = [];
+
+    for (const item of filteredItems) {
+      const isCompleted =
+        item.kind === 'habit' ? item.completionPct >= 1 : item.reminder.status === 'completed';
+
+      if (isCompleted) {
+        completedItems.push(item);
+        continue;
+      }
+
+      if (item.kind === 'reminder') {
+        reminderItems.push(item);
+        continue;
+      }
+
+      const { habit } = item;
+      if (habit.schedule_weekdays && habit.schedule_weekdays.length > 0) {
+        specificDaysItems.push(item);
+      } else if (habit.frequency === 'daily') {
+        dailyItems.push(item);
+      } else if (habit.frequency === 'weekly') {
+        weeklyItems.push(item);
+      } else if (habit.frequency === 'monthly') {
+        monthlyItems.push(item);
+      } else {
+        dailyItems.push(item);
+      }
+    }
+
+    return [
+      { key: 'daily', title: '☀️ Hábitos Diarios', items: dailyItems },
+      { key: 'specific_days', title: '📅 Días Específicos', items: specificDaysItems },
+      { key: 'weekly', title: '🔄 Hábitos Semanales', items: weeklyItems },
+      { key: 'monthly', title: '🗓️ Hábitos Mensuales', items: monthlyItems },
+      { key: 'reminders', title: '⏰ Recordatorios', items: reminderItems },
+      { key: 'completed', title: '✅ Terminados', items: completedItems },
+    ].filter((sec) => sec.items.length > 0);
+  }, [filteredItems]);
+
+  const toggleSection = (key: string) => {
+    setCollapsedSections((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
 
   const todayLabel = new Intl.DateTimeFormat('es-ES', {
     weekday: 'long',
@@ -69,7 +134,7 @@ export default function TimelineScreen() {
       <SafeAreaView style={styles.safeArea}>
         {/* Top Header */}
         <View style={styles.headerRow}>
-          <View>
+          <View style={styles.headerTitleContainer}>
             <ThemedText type="subtitle">Hoy</ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.capitalized}>
               {todayLabel}
@@ -100,40 +165,50 @@ export default function TimelineScreen() {
           </View>
         </View>
 
-        {/* Progress summary banner */}
-        {habitItems.length > 0 && (
-          <ThemedView type="backgroundElement" style={styles.summaryCard}>
-            <View style={styles.summaryInfo}>
-              <ThemedText type="smallBold">Progreso del día</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                {completedCount} de {habitItems.length} hábitos completados (
-                {Math.round(progressRatio * 100)}%)
+        {/* Progress summary banner (FIXED / PERMANENTE) */}
+        <ThemedView type="backgroundElement" style={styles.summaryCard}>
+          <View style={styles.summaryTopRow}>
+            <ThemedText type="smallBold" style={styles.summaryTitle}>
+              Progreso del día
+            </ThemedText>
+            <View
+              style={[
+                styles.percentBadge,
+                { backgroundColor: totalProgressRatio >= 1 ? '#22C55E' : '#3B82F6' },
+              ]}>
+              <ThemedText type="smallBold" style={styles.percentBadgeText}>
+                {Math.round(totalProgressRatio * 100)}%
               </ThemedText>
             </View>
-            <View style={styles.summaryBarTrack}>
-              <View
-                style={[
-                  styles.summaryBarFill,
-                  {
-                    width: `${Math.round(progressRatio * 100)}%`,
-                    backgroundColor: progressRatio >= 1 ? '#22C55E' : '#3B82F6',
-                  },
-                ]}
-              />
-            </View>
-          </ThemedView>
-        )}
+          </View>
 
-        {/* Filter chips */}
+          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+            {allDueHabits.length === 0
+              ? 'No hay hábitos programados para hoy'
+              : `${totalCompletedCount} de ${allDueHabits.length} hábitos completados hoy`}
+          </ThemedText>
+
+          <View style={styles.summaryBarTrack}>
+            <View
+              style={[
+                styles.summaryBarFill,
+                {
+                  width: `${Math.min(100, Math.round(totalProgressRatio * 100))}%`,
+                  backgroundColor: totalProgressRatio >= 1 ? '#22C55E' : '#3B82F6',
+                },
+              ]}
+            />
+          </View>
+        </ThemedView>
+
+        {/* Category Filters (Only category filter) */}
         <TimelineFilters
-          frequency={frequency}
           categoryId={categoryId}
           categories={categories}
-          onFrequencyChange={setFrequency}
           onCategoryChange={setCategoryId}
         />
 
-        {/* Timeline list */}
+        {/* Timeline list with Collapsible Sections */}
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.list}
@@ -144,7 +219,7 @@ export default function TimelineScreen() {
               tintColor={theme.text}
             />
           }>
-          {items.length === 0 ? (
+          {sections.length === 0 ? (
             <ThemedView type="backgroundElement" style={styles.emptyContainer}>
               <ThemedText type="subtitle" style={styles.emptyIcon}>
                 🌱
@@ -153,7 +228,7 @@ export default function TimelineScreen() {
                 Todo listo por ahora
               </ThemedText>
               <ThemedText type="small" themeColor="textSecondary" style={styles.emptyDesc}>
-                No tienes hábitos ni recordatorios programados con los filtros seleccionados.
+                No tienes hábitos ni recordatorios para los filtros seleccionados.
               </ThemedText>
               <View style={styles.emptyButtons}>
                 <Pressable
@@ -166,39 +241,73 @@ export default function TimelineScreen() {
               </View>
             </ThemedView>
           ) : (
-            items.map((item) => (
-              <TimelineItemRow
-                key={`${item.kind}-${item.id}`}
-                item={item}
-                onToggleComplete={() => {
-                  if (item.kind === 'habit') {
-                    if (item.habit.tracking_type === 'boolean') {
-                      toggleBooleanProgress(item.habit.id, isoDate);
-                    } else {
-                      // Numeric or Duration habit
-                      if (item.completionPct >= 1) {
-                        // Reset progress for today
-                        deleteLogsOnDay(item.habit.id, isoDate);
-                      } else {
-                        // Fill remaining progress to 100%
-                        const remaining = Math.max(1, item.habit.target_value - item.progressValue);
-                        logProgress(item.habit.id, isoDate, remaining, 'manual');
-                      }
-                    }
-                  } else {
-                    toggleReminderComplete(
-                      item.reminder.id,
-                      item.reminder.status !== 'completed',
-                    );
-                  }
-                }}
-                onAddProgress={(amount) => {
-                  if (item.kind === 'habit') {
-                    logProgress(item.habit.id, isoDate, amount, 'manual');
-                  }
-                }}
-              />
-            ))
+            sections.map((section) => {
+              const isCollapsed = Boolean(collapsedSections[section.key]);
+
+              return (
+                <View key={section.key} style={styles.sectionWrap}>
+                  {/* Collapsible Section Header */}
+                  <Pressable
+                    onPress={() => toggleSection(section.key)}
+                    style={({ pressed }) => [
+                      styles.sectionHeaderButton,
+                      pressed && { opacity: 0.7 },
+                    ]}>
+                    <View style={styles.sectionHeaderLeft}>
+                      <ThemedText type="smallBold">{section.title}</ThemedText>
+                      <View style={styles.countBadge}>
+                        <ThemedText type="smallBold" themeColor="textSecondary">
+                          {section.items.length}
+                        </ThemedText>
+                      </View>
+                    </View>
+
+                    <ThemedText type="smallBold" themeColor="textSecondary">
+                      {isCollapsed ? '▶' : '▼'}
+                    </ThemedText>
+                  </Pressable>
+
+                  {/* Section Items (if not collapsed) */}
+                  {!isCollapsed && (
+                    <View style={styles.sectionItemsList}>
+                      {section.items.map((item) => (
+                        <TimelineItemRow
+                          key={`${item.kind}-${item.id}`}
+                          item={item}
+                          onToggleComplete={() => {
+                            if (item.kind === 'habit') {
+                              if (item.habit.tracking_type === 'boolean') {
+                                toggleBooleanProgress(item.habit.id, isoDate);
+                              } else {
+                                if (item.completionPct >= 1) {
+                                  deleteLogsOnDay(item.habit.id, isoDate);
+                                } else {
+                                  const remaining = Math.max(
+                                    1,
+                                    item.habit.target_value - item.progressValue,
+                                  );
+                                  logProgress(item.habit.id, isoDate, remaining, 'manual');
+                                }
+                              }
+                            } else {
+                              toggleReminderComplete(
+                                item.reminder.id,
+                                item.reminder.status !== 'completed',
+                              );
+                            }
+                          }}
+                          onAddProgress={(amount) => {
+                            if (item.kind === 'habit') {
+                              logProgress(item.habit.id, isoDate, amount, 'manual');
+                            }
+                          }}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })
           )}
         </ScrollView>
       </SafeAreaView>
@@ -225,12 +334,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: Spacing.one,
   },
+  headerTitleContainer: {
+    flex: 1,
+  },
   capitalized: {
     textTransform: 'capitalize',
   },
   headerActions: {
     flexDirection: 'row',
     gap: Spacing.two,
+    flexShrink: 0,
   },
   actionButton: {
     backgroundColor: '#3B82F6',
@@ -250,27 +363,65 @@ const styles = StyleSheet.create({
   summaryCard: {
     padding: Spacing.three,
     borderRadius: Spacing.three,
-    gap: Spacing.two,
+    gap: Spacing.one,
   },
-  summaryInfo: {
+  summaryTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  summaryTitle: {
+    flex: 1,
+  },
+  percentBadge: {
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 2,
+    borderRadius: Spacing.one,
+    flexShrink: 0,
+  },
+  percentBadgeText: {
+    color: '#ffffff',
+    fontSize: 12,
   },
   summaryBarTrack: {
     height: 8,
     borderRadius: 999,
     backgroundColor: 'rgba(128, 128, 128, 0.2)',
     overflow: 'hidden',
+    marginTop: Spacing.half,
   },
   summaryBarFill: {
     height: '100%',
     borderRadius: 999,
   },
   list: {
-    gap: Spacing.two,
-    paddingTop: Spacing.two,
+    gap: Spacing.three,
+    paddingTop: Spacing.one,
     paddingBottom: Spacing.six,
+  },
+  sectionWrap: {
+    gap: Spacing.one,
+  },
+  sectionHeaderButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.one,
+    paddingHorizontal: Spacing.one,
+  },
+  sectionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  countBadge: {
+    backgroundColor: 'rgba(128, 128, 128, 0.15)',
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 1,
+    borderRadius: 999,
+  },
+  sectionItemsList: {
+    gap: Spacing.two,
   },
   emptyContainer: {
     padding: Spacing.five,
